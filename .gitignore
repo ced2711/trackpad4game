@@ -1,0 +1,4 @@
+*.exe
+settings.ini
+error.log
+tests/run/
