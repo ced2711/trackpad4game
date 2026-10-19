@@ -1,4 +1,5 @@
 *.exe
 settings.ini
 error.log
+obj/
 tests/run/
