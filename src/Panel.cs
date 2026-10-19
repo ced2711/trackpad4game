@@ -131,6 +131,12 @@ namespace Trackpad4Game
             if (capturing == null)
             {
                 if (key == Keys.Escape) { Hide(); return true; }
+                // The hooks pause while the panel is open, so handle the on/off key here.
+                if (key == app.S.ToggleKey && (keyData & Keys.Modifiers) == 0)
+                {
+                    if ((msg.LParam.ToInt64() & 0x40000000) == 0) app.SetEnabled(!app.S.Enabled, false); // ignore auto-repeat
+                    return true;
+                }
                 return base.ProcessCmdKey(ref msg, keyData);
             }
             if (key == Keys.ShiftKey || key == Keys.ControlKey || key == Keys.Menu || key == Keys.LWin || key == Keys.RWin)
