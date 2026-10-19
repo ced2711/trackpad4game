@@ -17,30 +17,19 @@ namespace Trackpad4Game
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                // Same drawing as the website icon (forthgaze apps/trackpad4game/icon.svg, a 108-unit grid).
-                Color ink = on ? Ui.Accent : Color.FromArgb(132, 132, 142);
+                // Same drawing as the website icon (forthgaze apps/trackpad4game/icon.svg, a 108-unit grid):
+                // a white touchpad with a green left and a white right button. Off: everything grey.
                 float u = size / 108f;
+                Color white = on ? Color.FromArgb(245, 245, 245) : Color.FromArgb(140, 140, 150);
+                Color green = on ? Color.FromArgb(74, 222, 128) : Color.FromArgb(90, 90, 100);
                 Ui.FillRound(g, Color.FromArgb(17, 18, 20), new RectangleF(0, 0, size, size), size * 15f / 64f);
 
-                float stroke = Math.Max(1.3f, 7 * u);
-                var pad = new RectangleF(23 * u, 20 * u, 62 * u, 68 * u);
-                float split = 63 * u;
-                using (var path = Ui.Round(pad, 11 * u))
-                {
-                    if (on)
-                    {
-                        g.SetClip(path);
-                        using (var b = new SolidBrush(ink))
-                            g.FillRectangle(b, pad.Left, split, pad.Width / 2, pad.Bottom - split);
-                        g.ResetClip();
-                    }
-                    using (var pen = new Pen(ink, stroke))
-                    {
-                        g.DrawPath(pen, path);
-                        g.DrawLine(pen, pad.Left, split, pad.Right, split);
-                        g.DrawLine(pen, pad.Left + pad.Width / 2, split, pad.Left + pad.Width / 2, pad.Bottom);
-                    }
-                }
+                // Keep strokes and gaps at least about a pixel wide, so the 16 px tray icon stays readable.
+                float stroke = Math.Max(1.2f, 5 * u);
+                Ui.StrokeRound(g, white, stroke, new RectangleF(22 * u, 26 * u, 64 * u, 40 * u), 7 * u);
+                float top = Math.Max(71 * u, 66 * u + stroke / 2 + 1), h = Math.Max(1.5f, 84 * u - top);
+                Ui.FillRound(g, green, new RectangleF(22 * u, top, 30 * u, h), 4 * u);
+                Ui.FillRound(g, white, new RectangleF(56 * u, top, 30 * u, h), 4 * u);
             }
             return bmp;
         }
