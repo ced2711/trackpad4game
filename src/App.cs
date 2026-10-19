@@ -27,6 +27,8 @@ namespace Trackpad4Game
         {
             Current = this;
             S = Settings.Load();
+            if (S.Debug || Array.IndexOf(Environment.GetCommandLineArgs(), "--debug") >= 0)
+                Log.Start(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Settings.DefaultPath), "debug.log"));
             Lang.Zh = S.Language == "zh";
             if (Autostart.Get()) Autostart.Set(true); // keep the entry pointing at this exe if it moved
             // Switched-on state is remembered only in game-only mode: in every-app mode, starting
@@ -46,6 +48,8 @@ namespace Trackpad4Game
             engine.ToggleRequested += delegate { SetEnabled(!S.Enabled, true); };
             engine.FrontChanged += delegate { UpdateTouchpad(); if (PanelVisible) panel.Rebuild(); };
             hooked = engine.Start();
+            Log.Write("started: hooked=" + hooked + " left=" + S.LeftKey + " right=" + S.RightKey + " toggle=" + S.ToggleKey + " enabled=" + S.Enabled
+                      + " block=" + S.BlockTouchpadClicks + " onlyGames=" + S.OnlyInGames + " keepMoving=" + S.KeepPointerMoving + " touchpad=" + TouchpadSupported);
 
             msg = new MsgWindow(this);
             SystemEvents.SessionEnding += OnSessionEnding;
@@ -105,6 +109,7 @@ namespace Trackpad4Game
         {
             // The keys stay normal keys while the panel is open, so a new key can be picked.
             engine.Suspended = visible;
+            Log.Write("panel " + (visible ? "shown" : "hidden"));
             if (visible) engine.ReleaseHeld();
         }
 
@@ -138,6 +143,7 @@ namespace Trackpad4Game
 
         public void SetEnabled(bool on, bool fromKey)
         {
+            Log.Write("SetEnabled " + on + (fromKey ? " (key)" : " (ui)"));
             S.Enabled = on;
             engine.Enabled = on;
             if (on) engine.Rehook(); else engine.ReleaseHeld();
@@ -233,7 +239,7 @@ namespace Trackpad4Game
                 if (current <= Touchpad.MostSensitive) return;
                 S.TouchpadRestore = current;
                 S.Save();
-                Touchpad.SetSensitivity(Touchpad.MostSensitive);
+                Log.Write("touchpad sensitivity " + current + " -> 0: " + Touchpad.SetSensitivity(Touchpad.MostSensitive));
             }
             else if (!want && S.TouchpadRestore >= 0) RestoreTouchpad();
         }
@@ -241,7 +247,7 @@ namespace Trackpad4Game
         public void RestoreTouchpad()
         {
             if (S.TouchpadRestore < 0) return;
-            Touchpad.SetSensitivity(S.TouchpadRestore);
+            Log.Write("touchpad sensitivity restored to " + S.TouchpadRestore + ": " + Touchpad.SetSensitivity(S.TouchpadRestore));
             S.TouchpadRestore = -1;
             S.Save();
         }

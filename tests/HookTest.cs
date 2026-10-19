@@ -46,6 +46,12 @@ static class HookTest
         bool haveTaskbar = taskbar != IntPtr.Zero && GetWindowRect(taskbar, out bar) && (bar.R - bar.L) > 0;
         GetWindowRect(taskbar, out bar);
         var onTaskbar = new POINT { X = (bar.L + bar.R) / 2 - 300, Y = (bar.T + bar.B) / 2 };
+        // Another window (a full-screen app, for example) may cover the taskbar there.
+        if (haveTaskbar && GetAncestor(WindowFromPoint(onTaskbar), 2) != taskbar)
+        {
+            Console.WriteLine("SKIP taskbar click check: the taskbar is covered by another window");
+            haveTaskbar = false;
+        }
 
         int failures = 0;
         var worker = new Thread(() =>
@@ -74,6 +80,13 @@ static class HookTest
                 Tap(VK_F15); // off
                 Button(true, false);
             });
+            Tap(VK_F15); // on again (the previous check ended switched off)
+            Thread.Sleep(4500); // the app renews its hooks every 2 s
+            failures += Check("keys still work after hook renewals", () =>
+            {
+                Key(VK_F13, true); Thread.Sleep(2200); Key(VK_F13, false); // held across a renewal
+            }, "LDOWN", "LUP");
+            failures += Check("touchpad still blocked after renewals", () => { Click(true); });
             SetCursorPos(saved.X, saved.Y);
             Application.Exit();
         });
@@ -198,4 +211,6 @@ static class HookTest
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
 }

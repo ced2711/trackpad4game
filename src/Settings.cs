@@ -18,6 +18,7 @@ namespace Trackpad4Game
         public bool OnlyInGames = true;
         public List<string> Games = new List<string> { "javaw", "java", "Minecraft.Windows" };
         public bool Beep = true;
+        public bool Debug;
         public string Language = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh" ? "zh" : "en";
         public int TouchpadRestore = -1; // touchpad sensitivity to put back after a crash, or -1
         public bool FirstRun;
@@ -59,6 +60,7 @@ namespace Trackpad4Game
                     case "OnlyInGames": s.OnlyInGames = ParseBool(value, s.OnlyInGames); break;
                     case "GamePrograms": s.Games = ParseGames(value); break;
                     case "Beep": s.Beep = ParseBool(value, s.Beep); break;
+                    case "Debug": s.Debug = ParseBool(value, false); break;
                     case "Language": s.Language = value == "zh" ? "zh" : "en"; break;
                     case "TouchpadRestore":
                         int n;
@@ -93,6 +95,7 @@ namespace Trackpad4Game
                     "OnlyInGames=" + OnlyInGames,
                     "GamePrograms=" + string.Join(", ", Games.ConvertAll(g => g + ".exe")),
                     "Beep=" + Beep,
+                    "Debug=" + Debug,
                     "Language=" + Language,
                     "TouchpadRestore=" + TouchpadRestore,
                 });

@@ -78,6 +78,10 @@ namespace Trackpad4Game
                 thread.Start();
                 ready.WaitOne(5000);
             }
+            // Foreground tracking looks up process names, which can be slow, so it stays off the hook thread.
+            foregroundHook = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND,
+                                                    IntPtr.Zero, foregroundProc, 0, 0, 0); // WINEVENT_OUTOFCONTEXT
+            UpdateFront(Native.GetForegroundWindow());
             return hooked;
         }
 
@@ -86,41 +90,98 @@ namespace Trackpad4Game
         public void Stop()
         {
             ReleaseHeld();
+            if (foregroundHook != IntPtr.Zero) { Native.UnhookWinEvent(foregroundHook); foregroundHook = IntPtr.Zero; }
             if (threadId != 0) Native.PostThreadMessage(threadId, Native.WM_QUIT, IntPtr.Zero, IntPtr.Zero);
             if (thread != null) thread.Join(1000);
         }
 
+        // The hook thread. Windows removes a low-level hook for good, without telling anyone, when one call
+        // takes too long (a few hundred ms). So this thread runs nothing but the hooks, the hook code is
+        // warmed up before the first real event, and the hooks are renewed every few seconds in case
+        // Windows dropped one anyway (for example while the PC was very busy).
         void Run(ManualResetEvent ready)
         {
             threadId = Native.GetCurrentThreadId();
             Native.MSG msg;
             Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, 0); // creates this thread's message queue
+            WarmUp();
             hooked = Hook();
-            foregroundHook = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND,
-                                                    IntPtr.Zero, foregroundProc, 0, 0, 0); // WINEVENT_OUTOFCONTEXT
-            UpdateFront(Native.GetForegroundWindow());
+            Native.SetTimer(IntPtr.Zero, IntPtr.Zero, 2000, IntPtr.Zero);
             ready.Set();
             while (Native.GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
-                if (msg.message == WM_REHOOK) Hook();
-            Unhook();
-            if (foregroundHook != IntPtr.Zero) Native.UnhookWinEvent(foregroundHook);
+            {
+                if (msg.message == WM_REHOOK || msg.message == Native.WM_TIMER)
+                {
+                    Hook();
+                    if (Log.On && msg.message == Native.WM_TIMER && keyEvents + buttonEvents > 0)
+                    {
+                        Log.Write("hooks alive: " + keyEvents + " key events, " + buttonEvents + " button events in the last 2 s");
+                        keyEvents = buttonEvents = 0;
+                    }
+                }
+            }
+            Unhook(keyboardHook, mouseHook);
         }
 
+        int keyEvents, buttonEvents; // for the debug log only
+
+        // Installs fresh hooks before removing the old ones, so no key or button event is missed in between.
+        // An event both see is harmless: the newer hook runs first, and anything it acts on, it swallows.
         bool Hook()
         {
-            Unhook();
+            IntPtr oldKeyboard = keyboardHook, oldMouse = mouseHook;
             IntPtr module = Native.GetModuleHandle(null);
-            keyboardHook = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, keyboardProc, module, 0);
-            mouseHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, mouseProc, module, 0);
+            IntPtr kb = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, keyboardProc, module, 0);
+            int kbErr = Marshal.GetLastWin32Error();
+            IntPtr ms = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, mouseProc, module, 0);
+            int msErr = Marshal.GetLastWin32Error();
+            if (kb != IntPtr.Zero) keyboardHook = kb;
+            if (ms != IntPtr.Zero) mouseHook = ms;
+            Unhook(kb != IntPtr.Zero ? oldKeyboard : IntPtr.Zero, ms != IntPtr.Zero ? oldMouse : IntPtr.Zero);
+            if (kb == IntPtr.Zero || ms == IntPtr.Zero || oldKeyboard == IntPtr.Zero)
+                Log.Write("hooks installed: keyboard=" + (kb != IntPtr.Zero) + " (" + kbErr + ") mouse=" + (ms != IntPtr.Zero) + " (" + msErr + ")");
             return keyboardHook != IntPtr.Zero && mouseHook != IntPtr.Zero;
         }
 
-        void Unhook()
+        static void Unhook(IntPtr kb, IntPtr ms)
         {
-            if (keyboardHook != IntPtr.Zero) Native.UnhookWindowsHookEx(keyboardHook);
-            if (mouseHook != IntPtr.Zero) Native.UnhookWindowsHookEx(mouseHook);
-            keyboardHook = mouseHook = IntPtr.Zero;
+            if (kb != IntPtr.Zero) Native.UnhookWindowsHookEx(kb);
+            if (ms != IntPtr.Zero) Native.UnhookWindowsHookEx(ms);
         }
+
+        // Runs every code path the hooks use once, so the first real event does not wait for the JIT compiler.
+        void WarmUp()
+        {
+            var probe = new Mapper();
+            probe.OnKey(Keys.V, true, true, true); probe.OnKey(Keys.V, false, true, true);
+            probe.OnButton(true, true, true); probe.OnButton(true, false, false);
+            IsExempt(new Native.POINT(0, 0));
+            IntPtr buf = Marshal.AllocHGlobal(64);
+            try
+            {
+                for (int i = 0; i < 64; i += 4) Marshal.WriteInt32(buf, i, 0);
+                KeyboardProc(-1, IntPtr.Zero, buf);
+                MouseProc(-1, IntPtr.Zero, buf);
+                ReadKey(buf); ReadButton(buf);
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+            Marshal.SizeOf(typeof(Native.INPUT));
+            foreach (var m in new[] { "KeyboardProc", "MouseProc", "IsExempt", "SendButton", "StateText" })
+            {
+                var mi = typeof(Engine).GetMethod(m, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static
+                                                      | System.Reflection.BindingFlags.NonPublic);
+                if (mi != null) System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(mi.MethodHandle);
+            }
+        }
+
+        // Field offsets of the hook structs, read directly: much faster than Marshal.PtrToStructure.
+        static readonly int KeyFlagsOffset = (int)Marshal.OffsetOf(typeof(Native.KBDLLHOOKSTRUCT), "flags");
+        static readonly int MouseFlagsOffset = (int)Marshal.OffsetOf(typeof(Native.MSLLHOOKSTRUCT), "flags");
+        static readonly int MouseExtraOffset = (int)Marshal.OffsetOf(typeof(Native.MSLLHOOKSTRUCT), "dwExtraInfo");
+
+        static Keys ReadKey(IntPtr p) { return (Keys)Marshal.ReadInt32(p, 0); }
+
+        static Native.POINT ReadButton(IntPtr p) { return new Native.POINT(Marshal.ReadInt32(p, 0), Marshal.ReadInt32(p, 4)); }
 
         static readonly HashSet<string> ShellApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "explorer", "ShellExperienceHost", "StartMenuExperienceHost", "SearchHost", "SearchApp", "LockApp", "ApplicationFrameHost" };
@@ -138,6 +199,7 @@ namespace Trackpad4Game
                 if (inner != 0) { pid = inner; name = Native.ProcessName(pid); }
             }
             frontApp = name;
+            Log.Write("foreground: " + name);
             gameInFront = name != null && games.Contains(name);
             if (name != null && pid != ownPid && !ShellApps.Contains(name)) lastApp = name;
             Post(FrontChanged);
@@ -157,10 +219,17 @@ namespace Trackpad4Game
                 bool up = msg == Native.WM_KEYUP || msg == Native.WM_SYSKEYUP;
                 if (down || up)
                 {
-                    var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                     bool toggleAllowed = !Suspended && (!OnlyInGames || gameInFront);
                     bool swallow;
-                    lock (mapper) swallow = mapper.OnKey((Keys)k.vkCode, down, Active, toggleAllowed);
+                    Keys key = ReadKey(lParam);
+                    keyEvents++;
+                    lock (mapper)
+                    {
+                        swallow = mapper.OnKey(key, down, Active, toggleAllowed);
+                        if (Log.On && (key == mapper.LeftKey || key == mapper.RightKey || key == mapper.ToggleKey))
+                            Log.Write("key " + key + (down ? " down" : " up") + " flags=" + Marshal.ReadInt32(lParam, KeyFlagsOffset)
+                                      + " " + StateText() + " swallow=" + swallow);
+                    }
                     if (swallow) return (IntPtr)1;
                 }
             }
@@ -176,20 +245,36 @@ namespace Trackpad4Game
                 bool isRight = msg == Native.WM_RBUTTONDOWN || msg == Native.WM_RBUTTONUP;
                 if (isLeft || isRight)
                 {
-                    var m = (Native.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.MSLLHOOKSTRUCT));
+                    IntPtr extra = Marshal.ReadIntPtr(lParam, MouseExtraOffset);
                     // Only our own clicks pass by marker. Some touchpad drivers inject their taps,
                     // so the "injected" flag alone does not mean the click came from us.
-                    if (m.dwExtraInfo != Marker)
+                    if (extra != Marker)
                     {
+                        var pt = ReadButton(lParam);
                         bool isDown = msg == Native.WM_LBUTTONDOWN || msg == Native.WM_RBUTTONDOWN;
-                        bool block = isDown && BlockClicks && Active && !IsExempt(m.pt);
+                        bool block = isDown && BlockClicks && Active && !IsExempt(pt);
                         bool swallow;
+                        buttonEvents++;
                         lock (mapper) swallow = mapper.OnButton(isLeft, isDown, block);
+                        if (Log.On)
+                        {
+                            uint pid;
+                            string cls = Native.RootClassName(Native.WindowFromPoint(pt), out pid);
+                            Log.Write("button " + (isLeft ? "L" : "R") + (isDown ? " down" : " up") + " at " + pt.X + "," + pt.Y
+                                      + " over " + cls + " flags=" + Marshal.ReadInt32(lParam, MouseFlagsOffset) + " extra=0x" + extra.ToInt64().ToString("X")
+                                      + " " + StateText() + " block=" + block + " swallow=" + swallow);
+                        }
                         if (swallow) return (IntPtr)1;
                     }
                 }
             }
             return Native.CallNextHookEx(mouseHook, nCode, wParam, lParam);
+        }
+
+        string StateText()
+        {
+            return "[enabled=" + Enabled + " suspended=" + Suspended + " onlyGames=" + OnlyInGames + " gameFront=" + gameInFront
+                + " front=" + frontApp + " active=" + Active + " blockClicks=" + BlockClicks + "]";
         }
 
         // Clicks on the taskbar, the tray and our own windows always work, so the touchpad
