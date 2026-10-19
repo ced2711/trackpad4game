@@ -17,13 +17,15 @@ namespace Trackpad4Game
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                // Same drawing as the website icon (forthgaze apps/trackpad4game/icon.svg, a 108-unit grid).
                 Color ink = on ? Ui.Accent : Color.FromArgb(132, 132, 142);
-                Ui.FillRound(g, Color.FromArgb(28, 28, 33), new RectangleF(0, 0, size, size), size * 0.24f);
+                float u = size / 108f;
+                Ui.FillRound(g, Color.FromArgb(17, 18, 20), new RectangleF(0, 0, size, size), size * 15f / 64f);
 
-                float stroke = Math.Max(1.4f, size * 0.085f);
-                var pad = new RectangleF(size * 0.2f, size * 0.17f, size * 0.6f, size * 0.66f);
-                float split = pad.Top + pad.Height * 0.64f;
-                using (var path = Ui.Round(pad, size * 0.11f))
+                float stroke = Math.Max(1.3f, 7 * u);
+                var pad = new RectangleF(23 * u, 20 * u, 62 * u, 68 * u);
+                float split = 63 * u;
+                using (var path = Ui.Round(pad, 11 * u))
                 {
                     if (on)
                     {
