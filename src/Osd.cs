@@ -68,19 +68,25 @@ namespace Trackpad4Game
             }
             int textW = Math.Max(TextRenderer.MeasureText(title, fTitle).Width, TextRenderer.MeasureText(detail, fSmall).Width);
             var size = new Size(Math.Max(S(200), textW + S(64)), S(58));
+            fade.Stop();
+            // Show first (still invisible), then size and shape it: the first Show can otherwise
+            // move or resize the window after the rounded shape was cut for the old bounds.
+            if (!Visible)
+            {
+                Native.SetLayeredWindowAttributes(Handle, 0, 0, 2);
+                Show();
+            }
             Bounds = new Rectangle(wa.Left + (wa.Width - size.Width) / 2, wa.Bottom - size.Height - S(80), size.Width, size.Height);
-            using (var p = Ui.Round(new RectangleF(0, 0, size.Width, size.Height), S(14)))
+            using (var p = Ui.Round(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), S(14)))
             {
                 var old = Region;
                 Region = new Region(p);
                 if (old != null) old.Dispose();
             }
-            fade.Stop();
-            alpha = 240;
-            Native.SetLayeredWindowAttributes(Handle, 0, (byte)alpha, 2);
-            if (!Visible) Show();
             Native.SetTop(Handle);
-            Invalidate();
+            Refresh(); // paint the new state before it becomes visible
+            alpha = 255;
+            Native.SetLayeredWindowAttributes(Handle, 0, (byte)alpha, 2);
             hold.Stop();
             hold.Start();
         }
@@ -91,11 +97,16 @@ namespace Trackpad4Game
             g.Clear(BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float d = S(10);
-            using (var b = new SolidBrush(on ? Ui.Accent : Ui.Off))
-                g.FillEllipse(b, S(20), (Height - d) / 2f, d, d);
+            int w = ClientSize.Width, h = ClientSize.Height;
+            if (on)
+                using (var b = new SolidBrush(Ui.Accent))
+                    g.FillEllipse(b, S(20), (h - d) / 2f, d, d);
+            else
+                using (var pen = new Pen(Ui.Sub, Math.Max(1.5f, S(2))))
+                    g.DrawEllipse(pen, S(20), (h - d) / 2f, d, d); // hollow ring for "off"
             var flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
-            TextRenderer.DrawText(g, title, fTitle, new Rectangle(S(42), S(9), Width - S(52), S(22)), Ui.Fg, flags);
-            TextRenderer.DrawText(g, detail, fSmall, new Rectangle(S(42), S(31), Width - S(52), S(18)), Ui.Sub, flags);
+            TextRenderer.DrawText(g, title, fTitle, new Rectangle(S(42), S(8), w - S(52), S(24)), Ui.Fg, flags);
+            TextRenderer.DrawText(g, detail, fSmall, new Rectangle(S(42), S(31), w - S(52), S(19)), Ui.Sub, flags);
         }
     }
 }
